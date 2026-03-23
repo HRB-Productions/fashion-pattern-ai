@@ -1,10 +1,10 @@
 """
-Testes para a API FastAPI (main.py) - Versão 2.0 com i18n e tamanhos padronizados.
-Cobrir endpoints /health e /generate-pattern.
+Testes para a API FastAPI (main.py) - Versão 3.0 com preview, file server e i18n.
+Cobrir endpoints /health, /generate-pattern e /files.
 """
 import pytest
 from main import app, _calculate_size_delta
-from src.models.enums import FabricType, FitLevel, SizeSystem
+from src.models.enums import FabricType, FitLevel, SizeSystem, GarmentType
 from src.models.size_tables import SIZE_TABLES, is_valid_size, get_size_measurements
 
 
@@ -17,7 +17,7 @@ class TestHealthEndpoint:
         response = await client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
-        assert response.json()["version"] == "2.0"
+        assert response.json()["version"] == "3.0"
 
 
 class TestSizeDeltaCalculation:
@@ -132,7 +132,7 @@ class TestGeneratePatternEndpoint:
 
     @pytest.mark.asyncio
     async def test_generate_pattern_with_valid_data_br(self, client, sample_image_bytes):
-        """Endpoint deve gerar PDF com dados válidos (BR)."""
+        """Endpoint deve retornar JSON com preview_url e pdf_url (BR)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
             "size_system": "BR",
@@ -149,13 +149,18 @@ class TestGeneratePatternEndpoint:
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "application/pdf"
-        assert "molde_BL-001_BR_M.pdf" in response.headers["content-disposition"]
-        assert response.headers.get("x-pattern-message") == "Molde gerado com sucesso"
+        body = response.json()
+        assert "message" in body
+        assert "preview_url" in body
+        assert "pdf_url" in body
+        assert body["message"] == "Molde gerado com sucesso"
+        assert body["size"] == "M"
+        assert body["size_system"] == "BR"
+        assert "pieces" in body
 
     @pytest.mark.asyncio
     async def test_generate_pattern_with_valid_data_us(self, client, sample_image_bytes):
-        """Endpoint deve gerar PDF com dados válidos (US)."""
+        """Endpoint deve retornar JSON com preview_url e pdf_url (US)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
             "size_system": "US",
@@ -168,12 +173,14 @@ class TestGeneratePatternEndpoint:
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "application/pdf"
-        assert response.headers.get("x-pattern-message") == "Pattern generated successfully"
+        body = response.json()
+        assert body["message"] == "Pattern generated successfully"
+        assert "preview_url" in body
+        assert "pdf_url" in body
 
     @pytest.mark.asyncio
     async def test_generate_pattern_with_valid_data_eu(self, client, sample_image_bytes):
-        """Endpoint deve gerar PDF com dados válidos (EU)."""
+        """Endpoint deve retornar JSON com preview_url e pdf_url (EU)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
             "size_system": "EU",
@@ -186,8 +193,10 @@ class TestGeneratePatternEndpoint:
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "application/pdf"
-        assert response.headers.get("x-pattern-message") == "Molde generado con éxito"
+        body = response.json()
+        assert body["message"] == "Molde generado con éxito"
+        assert "preview_url" in body
+        assert "pdf_url" in body
 
     @pytest.mark.asyncio
     async def test_generate_pattern_with_back_image(self, client, sample_image_bytes):
@@ -206,7 +215,8 @@ class TestGeneratePatternEndpoint:
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "application/pdf"
+        body = response.json()
+        assert body["message"] == "Molde gerado com sucesso"
 
     @pytest.mark.asyncio
     async def test_generate_pattern_rejects_invalid_size_system(self, client, sample_image_bytes):
@@ -282,7 +292,9 @@ class TestGeneratePatternEndpoint:
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert response.status_code == 200
-        assert response.headers["content-type"] == "application/pdf"
+        body = response.json()
+        assert "preview_url" in body
+        assert "pdf_url" in body
 
     @pytest.mark.asyncio
     async def test_generate_pattern_falta_front_image(self, client):
@@ -308,12 +320,12 @@ class TestGeneratePatternEndpoint:
             "fabric_type": "plano",
             "fit_level": "padrao",
             "reference": "BL-010",
-            # language não fornecido, deve usar pt-BR
         }
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert response.status_code == 200
-        assert response.headers.get("x-pattern-message") == "Molde gerado com sucesso"
+        body = response.json()
+        assert body["message"] == "Molde gerado com sucesso"
 
     @pytest.mark.asyncio
     async def test_generate_pattern_cors_header_presente(self, client, sample_image_bytes):
@@ -329,6 +341,31 @@ class TestGeneratePatternEndpoint:
         response = await client.post("/generate-pattern", files=files, data=data)
 
         assert "access-control-allow-origin" in response.headers or True
+
+
+class TestGarmentTypeEnumeration:
+    """Testes para enum GarmentType."""
+
+    def test_garment_type_blusa(self):
+        """GarmentType.BLUSA deve ser 'blusa'."""
+        assert GarmentType.BLUSA == "blusa"
+
+    def test_garment_type_vestido(self):
+        """GarmentType.VESTIDO deve ser 'vestido'."""
+        assert GarmentType.VESTIDO == "vestido"
+
+    def test_garment_type_camisa(self):
+        """GarmentType.CAMISA deve ser 'camisa'."""
+        assert GarmentType.CAMISA == "camisa"
+
+    def test_garment_type_short(self):
+        """GarmentType.SHORT deve ser 'short'."""
+        assert GarmentType.SHORT == "short"
+
+    def test_garment_type_invalid_value_raises(self):
+        """Valor inválido deve levantar ValueError."""
+        with pytest.raises(ValueError):
+            GarmentType("bermuda")
 
 
 class TestFabricTypeEnumeration:
@@ -396,3 +433,36 @@ class TestSizeSystemEnumeration:
         """Valor inválido deve levantar ValueError."""
         with pytest.raises(ValueError):
             SizeSystem("XX")
+
+
+class TestFilesEndpoint:
+    """Testes para GET /files."""
+
+    @pytest.mark.asyncio
+    async def test_serve_nonexistent_file_returns_404(self, client):
+        """Arquivo inexistente deve retornar 404."""
+        response = await client.get("/files/inexistente.pdf")
+        assert response.status_code == 404
+        assert "não encontrado" in response.json()["detail"]
+
+
+class TestGarmentTypeValidation:
+    """Testes para validação de garment_type."""
+
+    @pytest.mark.asyncio
+    async def test_generate_pattern_invalid_garment_type(self, client, sample_image_bytes):
+        """Tipo de peça inválido deve retornar 400 com mensagem clara."""
+        files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
+        data = {
+            "size_system": "BR",
+            "size_label": "M",
+            "fabric_type": "plano",
+            "fit_level": "padrao",
+            "reference": "BL-012",
+            "garment_type": "bermuda",  # inválido
+        }
+        response = await client.post("/generate-pattern", files=files, data=data)
+
+        assert response.status_code == 400
+        body = response.json()
+        assert "Tipo de peça inválido" in body["detail"] or "blusa" in body["detail"]
