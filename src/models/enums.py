@@ -1,5 +1,5 @@
 """
-Enumerações para tipos de tecido, caimento e tipo de peça.
+Enumerações para tipos de tecido, caimento, tipo de peça e sistema de tamanhos.
 """
 from enum import Enum
 
@@ -19,3 +19,8 @@ class GarmentType(str, Enum):
     SAIA        = "saia"
     CASACO      = "casaco"
     BODY        = "body"
+
+class SizeSystem(str, Enum):
+    BR = "BR"  # Brasil: PP, P, M, G, GG
+    US = "US"  # EUA: XS, S, M, L, XL
+    EU = "EU"  # Europa: 34, 38, 42, 46, 50
