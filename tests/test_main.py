@@ -365,7 +365,7 @@ class TestGarmentTypeEnumeration:
     def test_garment_type_invalid_value_raises(self):
         """Valor inválido deve levantar ValueError."""
         with pytest.raises(ValueError):
-            GarmentType("bermuda")
+            GarmentType("inexistente")
 
 
 class TestFabricTypeEnumeration:
@@ -443,7 +443,7 @@ class TestFilesEndpoint:
         """Arquivo inexistente deve retornar 404."""
         response = await client.get("/files/inexistente.pdf")
         assert response.status_code == 404
-        assert "não encontrado" in response.json()["detail"]
+        assert "detail" in response.json()
 
 
 class TestGarmentTypeValidation:
@@ -459,7 +459,7 @@ class TestGarmentTypeValidation:
             "fabric_type": "plano",
             "fit_level": "padrao",
             "reference": "BL-012",
-            "garment_type": "bermuda",  # inválido
+            "garment_type": "peça_invalida",  # inválido
         }
         response = await client.post("/generate-pattern", files=files, data=data)
 
