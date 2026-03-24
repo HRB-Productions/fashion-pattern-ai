@@ -4,6 +4,7 @@ Configurações globais para os testes.
 import pytest
 from httpx import ASGITransport, AsyncClient
 from main import app
+from unittest.mock import patch, MagicMock
 
 
 # Configurar pytest-asyncio
@@ -12,6 +13,18 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "asyncio: mark test as an asyncio test."
     )
+
+
+@pytest.fixture(scope="function", autouse=True)
+def mock_vision_components():
+    """Mock para componentes de visão que causam bloqueio nos testes."""
+    # Mock LandmarkExtractor no main.py (já importado)
+    with patch('main.LandmarkExtractor') as mock_landmark:
+        mock_instance = MagicMock()
+        mock_instance.extract.side_effect = ValueError("Pose não detectada")
+        mock_landmark.return_value = mock_instance
+
+        yield mock_landmark
 
 
 @pytest.fixture
@@ -25,9 +38,8 @@ async def client():
 @pytest.fixture
 def sample_image_bytes():
     """Bytes de imagem JPEG dummy para upload."""
-    import io
     # JPEG minimal válido (1x1 pixel)
-    return io.BytesIO(
+    return (
         b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00'
         b'\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t'
         b'\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a'

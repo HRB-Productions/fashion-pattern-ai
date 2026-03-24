@@ -131,7 +131,7 @@ class TestGeneratePatternEndpoint:
     """Testes para POST /generate-pattern."""
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_with_valid_data_br(self, client, sample_image_bytes):
+    async def test_generate_pattern_with_valid_data_br(self, client, sample_image_bytes, mock_vision_components):
         """Endpoint deve retornar JSON com preview_url e pdf_url (BR)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -159,7 +159,7 @@ class TestGeneratePatternEndpoint:
         assert "pieces" in body
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_with_valid_data_us(self, client, sample_image_bytes):
+    async def test_generate_pattern_with_valid_data_us(self, client, sample_image_bytes, mock_vision_components):
         """Endpoint deve retornar JSON com preview_url e pdf_url (US)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -179,7 +179,7 @@ class TestGeneratePatternEndpoint:
         assert "pdf_url" in body
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_with_valid_data_eu(self, client, sample_image_bytes):
+    async def test_generate_pattern_with_valid_data_eu(self, client, sample_image_bytes, mock_vision_components):
         """Endpoint deve retornar JSON com preview_url e pdf_url (EU)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -199,7 +199,7 @@ class TestGeneratePatternEndpoint:
         assert "pdf_url" in body
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_with_back_image(self, client, sample_image_bytes):
+    async def test_generate_pattern_with_back_image(self, client, sample_image_bytes, mock_vision_components):
         """Endpoint deve aceitar imagem posterior opcional."""
         files = {
             "front_image": ("front.jpg", sample_image_bytes, "image/jpeg"),
@@ -219,7 +219,7 @@ class TestGeneratePatternEndpoint:
         assert body["message"] == "Molde gerado com sucesso"
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_rejects_invalid_size_system(self, client, sample_image_bytes):
+    async def test_generate_pattern_rejects_invalid_size_system(self, client, sample_image_bytes, mock_vision_components):
         """Sistema de tamanhos inválido deve retornar 422 (FastAPI validation)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -234,7 +234,7 @@ class TestGeneratePatternEndpoint:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_rejects_invalid_size_label(self, client, sample_image_bytes):
+    async def test_generate_pattern_rejects_invalid_size_label(self, client, sample_image_bytes, mock_vision_components):
         """Tamanho inválido deve retornar 400."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -249,7 +249,7 @@ class TestGeneratePatternEndpoint:
         assert response.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_rejects_invalid_fabric_type(self, client, sample_image_bytes):
+    async def test_generate_pattern_rejects_invalid_fabric_type(self, client, sample_image_bytes, mock_vision_components):
         """Tipo de tecido inválido deve retornar 422 (FastAPI validation)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -264,7 +264,7 @@ class TestGeneratePatternEndpoint:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_rejects_invalid_fit_level(self, client, sample_image_bytes):
+    async def test_generate_pattern_rejects_invalid_fit_level(self, client, sample_image_bytes, mock_vision_components):
         """Nível de caimento inválido deve retornar 422 (FastAPI validation)."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -279,7 +279,7 @@ class TestGeneratePatternEndpoint:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_malha_justo(self, client, sample_image_bytes):
+    async def test_generate_pattern_malha_justo(self, client, sample_image_bytes, mock_vision_components):
         """Malha justo deve gerar molde."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -311,7 +311,7 @@ class TestGeneratePatternEndpoint:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_default_language_pt_br(self, client, sample_image_bytes):
+    async def test_generate_pattern_default_language_pt_br(self, client, sample_image_bytes, mock_vision_components):
         """Idioma padrão deve ser pt-BR."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {
@@ -328,7 +328,7 @@ class TestGeneratePatternEndpoint:
         assert body["message"] == "Molde gerado com sucesso"
 
     @pytest.mark.asyncio
-    async def test_generate_pattern_cors_header_presente(self, client, sample_image_bytes):
+    async def test_generate_pattern_cors_header_presente(self, client, sample_image_bytes, mock_vision_components):
         """CORS headers devem estar presentes."""
         files = {"front_image": ("test.jpg", sample_image_bytes, "image/jpeg")}
         data = {

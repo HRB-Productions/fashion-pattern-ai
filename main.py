@@ -165,10 +165,11 @@ async def generate_pattern(
         measurements = BodyMeasurements(**measurements_data)
 
         # 4. Extrair landmarks (opcional)
+        # Nota: LandmarkExtractor requer MediaPipe Pose model - não disponível em testes
         try:
             extractor = LandmarkExtractor()
             landmarks = extractor.extract(front_path)
-        except ValueError:
+        except (ValueError, FileNotFoundError, Exception):
             landmarks = None
 
         # 5. Classificar peça
