@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(\"C:/Program Files/GitHub CLI/gh.exe\" auth login)",
+      "Bash(\"C:/Program Files/GitHub CLI/gh.exe\" repo create fashion-pattern-ai --public --source=. --push 2>&1)",
+      "Bash(\"C:/Program Files/GitHub CLI/gh.exe\" auth status 2>&1)",
+      "Bash(\"C:/Program Files/GitHub CLI/gh.exe\" repo view fashion-pattern-ai 2>&1)",
+      "Bash(\"C:/Program Files/GitHub CLI/gh.exe\" api repos/HRB-Productions/fashion-pattern-ai/contents --jq '.[].name' 2>&1)",
+      "Bash(curl:*)",
+      "Bash(start:*)",
+      "Bash(tee test_output.txt)",
+      "Bash(git reset:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git gc:*)"
+    ]
+  }
+}

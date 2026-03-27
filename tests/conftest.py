@@ -24,7 +24,14 @@ def mock_vision_components():
         mock_instance.extract.side_effect = ValueError("Pose não detectada")
         mock_landmark.return_value = mock_instance
 
-        yield mock_landmark
+        # Mock _cleanup_job_dir para evitar bloqueio no pytest por 24h
+        with patch('main._cleanup_job_dir') as mock_cleanup:
+            # Em async, o retorno de AsyncMock já é awaitable. MagicMock(return_value=None) no Python 3.8+ asyncio pode dar erro se não tratado,
+            # mas vamos usar AsyncMock que resolve isso, ou simplesmente ignorar a chamada em BackgroundTasks.
+            from unittest.mock import AsyncMock
+            mock_cleanup.side_effect = AsyncMock()
+            
+            yield mock_landmark
 
 
 @pytest.fixture

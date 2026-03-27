@@ -18,3 +18,9 @@ class PatternPiece:
     notches: List[Point2D] = field(default_factory=list)
     dart_apex: Point2D | None = None       # ápice da pence (se houver)
     instructions: str = ""                 # ex: "Cortar 2x no dobro"
+    dimensions: List[dict] = field(default_factory=list) # cotas técnicas [{"label": "29cm", "start": p1, "end": p2, "type": "v/h"}]
+    
+    # Suporte para IA Generativa e Curvas Complexas
+    curves: List[dict] = field(default_factory=list)      # [{"id": "decote", "tipo": "bezier", "pontos": [...]}]
+    assembly_steps: List[str] = field(default_factory=list)
+    technical_ficha: dict = field(default_factory=dict)

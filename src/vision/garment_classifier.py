@@ -23,6 +23,8 @@ class GarmentFeatures:
     has_sleeves: bool
     neckline: str  # "redondo", "v", "quadrado", "gola_alta", "decote"
     has_dart: bool
+    has_collar: bool = False
+    has_cuffs: bool = False
 
 
 class GarmentClassifier:
@@ -148,6 +150,8 @@ class GarmentClassifier:
             has_sleeves=has_sleeves,
             neckline=neckline,
             has_dart=has_dart,
+            has_collar=False, # Default to manual for these
+            has_cuffs=False
         )
 
     def _classify_with_prompts(self, image_features, prompts: dict) -> any:

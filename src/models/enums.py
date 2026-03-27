@@ -21,6 +21,9 @@ class GarmentType(str, Enum):
     BODY        = "body"
     CAMISA      = "camisa"
     SHORT       = "short"
+    CAMISETA    = "camiseta"
+    MALHA_TOP   = "top"
+    BERMUDA     = "bermuda"
 
 class SizeSystem(str, Enum):
     BR = "BR"  # Brasil: PP, P, M, G, GG

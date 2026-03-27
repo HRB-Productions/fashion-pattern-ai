@@ -8,6 +8,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import tempfile
 import os
 import json
@@ -28,6 +29,7 @@ from src.pattern.ease_calculator import apply_ease_to_pieces
 from src.pattern.grading import grade_piece
 from src.export.pdf_generator import export_to_pdf
 from src.export.preview_generator import generate_preview
+from src.services.llm_pattern_service import LLMPatternService
 
 app = FastAPI(title="Fashion Pattern AI", version="3.0")
 
@@ -51,26 +53,13 @@ async def health():
     return {"status": "ok", "version": "3.0"}
 
 
-@app.get("/files/{filename}")
-async def serve_file(filename: str):
-    """
-    Serve arquivos gerados (preview e PDF).
-
-    URL: /files/molde_preview_XXX.png ou /files/molde_XXX.pdf
-    """
-    file_path = GENERATED_FILES_DIR / filename
-
-    if not file_path.exists():
+@app.get("/files/{file_id}/{filename}")
+async def get_file(file_id: str, filename: str):
+    """Serve arquivos gerados (PDF/PNG)."""
+    path = GENERATED_FILES_DIR / file_id / filename
+    if not path.exists():
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
-
-    if file_path.suffix.lower() == ".png":
-        media_type = "image/png"
-    elif file_path.suffix.lower() == ".pdf":
-        media_type = "application/pdf"
-    else:
-        media_type = "application/octet-stream"
-
-    return FileResponse(str(file_path), media_type=media_type, filename=filename)
+    return FileResponse(path, filename=filename)
 
 
 @app.post("/generate-pattern")
@@ -81,11 +70,14 @@ async def generate_pattern(
     size_label: str = Form(..., description="Tamanho (ex: M, S, 42)"),
     fabric_type: str = Form(..., description="Tipo de tecido", pattern="^(plano|malha)$"),
     fit_level: str = Form(..., description="Nível de caimento", pattern="^(justo|padrao|amplo)$"),
-    reference: str = Form(..., description="Referência do modelo (ex: BL-001)"),
+    reference: Optional[str] = Form(None, description="Referência do modelo (ex: BL-001)"),
     garment_type: Optional[str] = Form(None, description="Tipo de peça"),
-    has_sleeves: Optional[bool] = Form(None, description="Possui mangas"),
+    has_sleeves: Optional[str] = Form(None, description="Possui mangas"),
     neckline: Optional[str] = Form(None, description="Tipo de decote"),
-    has_dart: Optional[bool] = Form(None, description="Possui pence"),
+    has_dart: Optional[str] = Form(None, description="Possui pence"),
+    has_collar: Optional[str] = Form(None, description="Possui gola/colarinho"),
+    has_cuffs: Optional[str] = Form(None, description="Possui punhos"),
+    use_ai_mode: str = Form("false", description="Ativar Modo IA (Modelista Virtual)"),
     language: str = Form("pt-BR", description="Idioma das mensagens"),
 ):
     """
@@ -98,8 +90,16 @@ async def generate_pattern(
     - pieces: Lista de peças geradas
     """
     # Validar idioma
+    if language == "es":
+        language = "es-ES"
+    
     if language not in ["pt-BR", "en-US", "es-ES"]:
         language = "pt-BR"
+
+    # Criar referência se não fornecida
+    if not reference:
+        timestamp_ref = datetime.now().strftime("%H%M%S")
+        reference = f"MOD-{timestamp_ref}"
 
     # Validar enums
     try:
@@ -135,8 +135,18 @@ async def generate_pattern(
                 detail=f"Tipo de peça inválido. Opções válidas: {', '.join(valid_types)}"
             )
 
-    # Criar ID único para os arquivos
+    # Converter flags de string para bool
+    is_sleeves = has_sleeves == "true" or has_sleeves == "sim"
+    is_dart = has_dart == "true" or has_dart == "sim"
+    is_collar = has_collar == "true" or has_collar == "sim"
+    is_cuffs = has_cuffs == "true" or has_cuffs == "sim"
+    is_ai_mode = use_ai_mode == "true" or use_ai_mode == "sim"
+
+    # 0. Criar diretório de saída
+    GENERATED_FILES_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Criar ID único para os arquivos
     file_id = f"{reference}_{size_system}_{size_label}_{timestamp}"
 
     # Criar subdiretório para este pedido
@@ -151,6 +161,7 @@ async def generate_pattern(
             f.write(content)
 
         # 2. Salvar imagem posterior (se fornecida)
+        back_path = None
         if back_image and back_image.filename:
             back_path = job_dir / f"back_{back_image.filename}"
             with open(back_path, "wb") as f:
@@ -165,37 +176,46 @@ async def generate_pattern(
         measurements = BodyMeasurements(**measurements_data)
 
         # 4. Extrair landmarks (opcional)
-        # Nota: LandmarkExtractor requer MediaPipe Pose model - não disponível em testes
         try:
             extractor = LandmarkExtractor()
             landmarks = extractor.extract(front_path)
         except (ValueError, FileNotFoundError, Exception):
             landmarks = None
 
-        # 5. Classificar peça
-        if garment_type or has_sleeves is not None or neckline or has_dart is not None:
-            features = GarmentFeatures(
-                fabric_type=fabric,
-                garment_type=GarmentType(garment_type) if garment_type else GarmentType.BLUSA,
-                has_sleeves=has_sleeves if has_sleeves is not None else False,
-                neckline=neckline if neckline else "redondo",
-                has_dart=has_dart if has_dart is not None else False,
-            )
+        # 5. Configurar características do modelo
+        features = GarmentFeatures(
+            fabric_type=fabric,
+            garment_type=GarmentType(garment_type) if garment_type else GarmentType.BLUSA,
+            has_sleeves=is_sleeves,
+            neckline=neckline if neckline else "redondo",
+            has_dart=is_dart,
+            has_collar=is_collar,
+            has_cuffs=is_cuffs
+        )
+
+        # 6. Construir diagrama (Geométrico ou IA)
+        if is_ai_mode:
+            try:
+                llm_service = LLMPatternService()
+                molde_json = await llm_service.generate_draft(features, size_system, size_label, language)
+                if molde_json and "pecas" in molde_json:
+                    pieces = llm_service.parse_llm_response(molde_json)
+                else:
+                    # Fallback para geométrico se IA falhar
+                    builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
+                    pieces = builder.build_all()
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.error(f"Erro no Modo IA: {e}")
+                builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
+                pieces = builder.build_all()
         else:
-            features = GarmentFeatures(
-                fabric_type=fabric,
-                garment_type=GarmentType.BLUSA,
-                has_sleeves=False,
-                neckline="redondo",
-                has_dart=False,
-            )
+            builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
+            pieces = builder.build_all()
 
-        # 6. Construir diagrama
-        builder = DiagramBuilder(measurements, features)
-        pieces = builder.build_all()
-
-        # 7. Aplicar folga
-        pieces = apply_ease_to_pieces(pieces, fabric, fit, features.has_sleeves)
+        # 7. Aplicar folga (Apenas se não for IA, pois a IA já aplica folga no prompt)
+        if not is_ai_mode:
+            pieces = apply_ease_to_pieces(pieces, fabric, fit, features.has_sleeves)
 
         # 8. Atualizar metadados das peças
         for piece in pieces:
@@ -219,17 +239,15 @@ async def generate_pattern(
         background.add_task(_cleanup_job_dir, job_dir, file_id)
 
         # 12. Retornar JSON com URLs
-        preview_filename = f"{file_id}/molde_preview.png"
-        pdf_filename = f"{file_id}/molde.pdf"
-
+        preview_filename = "molde_preview.png"
+        pdf_filename = "molde.pdf"
         return JSONResponse(
             content={
                 "message": get_message(language, "success"),
-                "preview_url": f"/files/{preview_filename}",
-                "pdf_url": f"/files/{pdf_filename}",
+                "preview_url": f"/files/{file_id}/{preview_filename}",
+                "pdf_url": f"/files/{file_id}/{pdf_filename}",
                 "size": size_label,
                 "size_system": size_system,
-                "reference": reference,
                 "pieces": [
                     {"name": p.name, "reference": p.reference}
                     for p in pieces
@@ -244,6 +262,8 @@ async def generate_pattern(
             shutil.rmtree(job_dir, ignore_errors=True)
         raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         # Limpar diretório em caso de erro
         if job_dir.exists():
             shutil.rmtree(job_dir, ignore_errors=True)
@@ -283,6 +303,8 @@ async def _cleanup_temp(tmpdir: Path):
     await asyncio.sleep(0.1)
     shutil.rmtree(tmpdir, ignore_errors=True)
 
+# Monta o frontend na raiz
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

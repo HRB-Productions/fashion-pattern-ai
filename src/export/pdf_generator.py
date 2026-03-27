@@ -11,7 +11,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.units import cm
 from reportlab.graphics.shapes import Path, Drawing
-from reportlab.lib.colors import black, HexColor
+from reportlab.lib.colors import black, HexColor, gray
+from reportlab.lib import colors
 from src.models.pattern_piece import PatternPiece, Point2D
 import math
 
@@ -91,11 +92,13 @@ def _draw_page(
 def _draw_piece(c: rl_canvas.Canvas, piece: PatternPiece, ox: float, oy: float):
     """Desenha uma peça no canvas ReportLab com todas as marcações."""
     _draw_outline(c, piece, ox, oy)
+    _draw_curves(c, piece, ox, oy)
     _draw_seam_allowance(c, piece, ox, oy)
     _draw_grain_line(c, piece, ox, oy)
     _draw_notches(c, piece, ox, oy)
     if piece.dart_apex:
         _draw_dart_apex(c, piece.dart_apex, ox, oy, piece_height_cm(piece))
+    _draw_dimensions(c, piece, ox, oy)
     _draw_label(c, piece, ox, oy)
 
 
@@ -297,9 +300,81 @@ def _draw_label(c: rl_canvas.Canvas, piece: PatternPiece, ox: float, oy: float):
 
     c.setFont("Helvetica", 9)
     size_ref = f"TAM {piece.size} | {piece.reference}" if piece.size else piece.reference
-    c.drawString(label_x, label_y + 15, size_ref)
+    c.drawString(label_x, label_y + 20, size_ref)
+    
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(label_x, label_y + 10, piece.instructions)
 
-    c.drawString(label_x, label_y, piece.instructions)
+
+def _draw_dimensions(c: rl_canvas.Canvas, piece: PatternPiece, ox: float, oy: float):
+    """Desenha cotas técnicas no PDF."""
+    if not piece.dimensions:
+        return
+    
+    height = piece_height_cm(piece)
+    c.setStrokeColor(colors.gray)
+    c.setLineWidth(0.3)
+    c.setFont("Helvetica", 6)
+
+    for dim in piece.dimensions:
+        start = dim['start']
+        end = dim['end']
+        label = dim['label']
+        
+        x1 = ox + float(start[0]) * CM_TO_PT
+        y1 = oy + (height - float(start[1])) * CM_TO_PT
+        x2 = ox + float(end[0]) * CM_TO_PT
+        y2 = oy + (height - float(end[1])) * CM_TO_PT
+        
+        c.line(x1, y1, x2, y2)
+        
+        # Traços perpendiculares
+        tick = 2
+        if dim['type'] == 'h':
+            c.line(x1, y1 - tick, x1, y1 + tick)
+            c.line(x2, y2 - tick, x2, y2 + tick)
+        else:
+            c.line(x1 - tick, y1, x1 + tick, y1)
+            c.line(x2 - tick, y2, x2 + tick, y2)
+            
+        # Label no centro
+        c.drawCentredString((x1+x2)/2, (y1+y2)/2 + 2, label)
+
+
+def _draw_curves(c: rl_canvas.Canvas, piece: PatternPiece, ox: float, oy: float):
+    """Desenha curvas Bezier nativas no ReportLab."""
+    if not piece.curves:
+        return
+        
+    height = piece_height_cm(piece)
+    c.setLineWidth(0.5)
+    c.setStrokeColor(black)
+    
+    for curve in piece.curves:
+        pts = curve.get('pontos_controle', [])
+        if not pts:
+            continue
+            
+        path = c.beginPath()
+        coords = [
+            (ox + p[0] * CM_TO_PT, oy + (height - p[1]) * CM_TO_PT)
+            for p in pts
+        ]
+        
+        path.moveTo(coords[0][0], coords[0][1])
+        if len(coords) == 3: # Quadrática
+            p0, p1, p2 = coords
+            c1 = (p0[0] + 2/3*(p1[0]-p0[0]), p0[1] + 2/3*(p1[1]-p0[1]))
+            c2 = (p2[0] + 2/3*(p1[0]-p2[0]), p2[1] + 2/3*(p1[1]-p2[1]))
+            path.curveTo(c1[0], c1[1], c2[0], c2[1], p2[0], p2[1])
+        elif len(coords) == 4: # Cúbica
+            p0, p1, p2, p3 = coords
+            path.curveTo(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1])
+        else:
+            for p in coords[1:]:
+                path.lineTo(p[0], p[1])
+        
+        c.drawPath(path)
 
 
 def _tile_to_a4(
