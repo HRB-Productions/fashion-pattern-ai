@@ -1,6 +1,5 @@
 """
 Fashion Pattern AI — API FastAPI
-
 Sistema de Modelagem Industrial com Visão Computacional.
 Recebe imagem(s) de pessoa vestida + tamanho, exporta molde PDF 1:1.
 """
@@ -14,22 +13,20 @@ import os
 import json
 import asyncio
 import shutil
+import logging
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
-
 from src.models.measurements import BodyMeasurements
 from src.models.enums import FabricType, FitLevel, GarmentType, SizeSystem
 from src.models.size_tables import get_size_measurements, is_valid_size, SIZE_TABLES
 from src.i18n import get_message
 from src.vision.landmark_extractor import LandmarkExtractor
-from src.vision.garment_classifier import GarmentClassifier, GarmentFeatures
 from src.pattern.diagram_builder import DiagramBuilder
 from src.pattern.ease_calculator import apply_ease_to_pieces
 from src.pattern.grading import grade_piece
 from src.export.pdf_generator import export_to_pdf
 from src.export.preview_generator import generate_preview
-from src.services.llm_pattern_service import LLMPatternService
 
 app = FastAPI(title="Fashion Pattern AI", version="3.0")
 
@@ -46,12 +43,10 @@ app.add_middleware(
 GENERATED_FILES_DIR = Path("generated_files")
 GENERATED_FILES_DIR.mkdir(exist_ok=True)
 
-
 @app.get("/health")
 async def health():
     """Health check endpoint."""
     return {"status": "ok", "version": "3.0"}
-
 
 @app.get("/files/{file_id}/{filename}")
 async def get_file(file_id: str, filename: str):
@@ -60,7 +55,6 @@ async def get_file(file_id: str, filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Arquivo não encontrado")
     return FileResponse(path, filename=filename)
-
 
 @app.post("/generate-pattern")
 async def generate_pattern(
@@ -71,36 +65,39 @@ async def generate_pattern(
     fabric_type: str = Form(..., description="Tipo de tecido", pattern="^(plano|malha)$"),
     fit_level: str = Form(..., description="Nível de caimento", pattern="^(justo|padrao|amplo)$"),
     reference: Optional[str] = Form(None, description="Referência do modelo (ex: BL-001)"),
-    garment_type: Optional[str] = Form(None, description="Tipo de peça"),
-    has_sleeves: Optional[str] = Form(None, description="Possui mangas"),
-    neckline: Optional[str] = Form(None, description="Tipo de decote"),
-    has_dart: Optional[str] = Form(None, description="Possui pence"),
-    has_collar: Optional[str] = Form(None, description="Possui gola/colarinho"),
-    has_cuffs: Optional[str] = Form(None, description="Possui punhos"),
-    use_ai_mode: str = Form("false", description="Ativar Modo IA (Modelista Virtual)"),
+    
+    # PARÂMETROS AGORA OBRIGATÓRIOS (sem IA para adivinhar)
+    garment_type: str = Form(..., description="Tipo de peça: blusa, saia, calca, vestido"),
+    has_sleeves: str = Form(..., description="Possui mangas: true/false ou sim/nao"),
+    neckline: str = Form(..., description="Tipo de decote: redondo, v, quadrado"),
+    has_dart: str = Form("false", description="Possui pence: true/false ou sim/nao"),
+    has_collar: str = Form("false", description="Possui gola: true/false ou sim/nao"),
+    has_cuffs: str = Form("false", description="Possui punhos: true/false ou sim/nao"),
+    
     language: str = Form("pt-BR", description="Idioma das mensagens"),
 ):
     """
     Gera molde industrial a partir de imagem(s) e tamanho padronizado.
-
     Retorna JSON com:
     - message: Mensagem de sucesso localizada
     - preview_url: URL para imagem de pré-visualização
     - pdf_url: URL para download do PDF
     - pieces: Lista de peças geradas
     """
+    logger = logging.getLogger(__name__)
+    
     # Validar idioma
     if language == "es":
         language = "es-ES"
     
     if language not in ["pt-BR", "en-US", "es-ES"]:
         language = "pt-BR"
-
+    
     # Criar referência se não fornecida
     if not reference:
         timestamp_ref = datetime.now().strftime("%H%M%S")
         reference = f"MOD-{timestamp_ref}"
-
+    
     # Validar enums
     try:
         fabric = FabricType(fabric_type)
@@ -111,55 +108,53 @@ async def generate_pattern(
               get_message(language, "invalid_fit_level") if "fit" in str(fit_level).lower() else \
               get_message(language, "invalid_size_system")
         raise HTTPException(status_code=400, detail=msg)
-
+    
     # Validar tamanho
     if not is_valid_size(size_system, size_label):
         msg = get_message(language, "invalid_size")
         raise HTTPException(status_code=400, detail=msg)
-
+    
     # Validar imagem frontal
     if not front_image.filename:
         raise HTTPException(status_code=400, detail=get_message(language, "missing_image"))
-
+    
     if not front_image.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
         raise HTTPException(status_code=400, detail=get_message(language, "file_not_image"))
-
-    # Validar tipo de peça se fornecido
-    if garment_type:
-        try:
-            GarmentType(garment_type)
-        except ValueError:
-            valid_types = [t.value for t in GarmentType]
-            raise HTTPException(
-                status_code=400,
-                detail=f"Tipo de peça inválido. Opções válidas: {', '.join(valid_types)}"
-            )
-
+    
+    # Validar tipo de peça (agora obrigatório)
+    try:
+        garment = GarmentType(garment_type)
+    except ValueError:
+        valid_types = [t.value for t in GarmentType]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo de peça inválido. Opções válidas: {', '.join(valid_types)}"
+        )
+    
     # Converter flags de string para bool
-    is_sleeves = has_sleeves == "true" or has_sleeves == "sim"
-    is_dart = has_dart == "true" or has_dart == "sim"
-    is_collar = has_collar == "true" or has_collar == "sim"
-    is_cuffs = has_cuffs == "true" or has_cuffs == "sim"
-    is_ai_mode = use_ai_mode == "true" or use_ai_mode == "sim"
-
+    is_sleeves = has_sleeves.lower() in ["true", "sim", "yes", "1"]
+    is_dart = has_dart.lower() in ["true", "sim", "yes", "1"]
+    is_collar = has_collar.lower() in ["true", "sim", "yes", "1"]
+    is_cuffs = has_cuffs.lower() in ["true", "sim", "yes", "1"]
+    
     # 0. Criar diretório de saída
     GENERATED_FILES_DIR.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
+    
     # Criar ID único para os arquivos
     file_id = f"{reference}_{size_system}_{size_label}_{timestamp}"
-
+    
     # Criar subdiretório para este pedido
     job_dir = GENERATED_FILES_DIR / file_id
     job_dir.mkdir(exist_ok=True)
-
+    
     try:
         # 1. Salvar imagem frontal
         front_path = job_dir / f"front_{front_image.filename}"
         with open(front_path, "wb") as f:
             content = await front_image.read()
             f.write(content)
-
+        
         # 2. Salvar imagem posterior (se fornecida)
         back_path = None
         if back_image and back_image.filename:
@@ -167,61 +162,45 @@ async def generate_pattern(
             with open(back_path, "wb") as f:
                 content = await back_image.read()
                 f.write(content)
-
+        
         # 3. Buscar medidas da tabela
         measurements_data = get_size_measurements(size_system, size_label)
         if not measurements_data:
             raise HTTPException(status_code=400, detail=get_message(language, "size_not_found"))
-
+        
         measurements = BodyMeasurements(**measurements_data)
-
-        # 4. Extrair landmarks (opcional)
+        
+        # 4. Extrair landmarks (opcional - apenas para referência visual)
         try:
             extractor = LandmarkExtractor()
             landmarks = extractor.extract(front_path)
         except (ValueError, FileNotFoundError, Exception):
             landmarks = None
-
+        
         # 5. Configurar características do modelo
+        from src.vision.garment_classifier import GarmentFeatures
         features = GarmentFeatures(
             fabric_type=fabric,
-            garment_type=GarmentType(garment_type) if garment_type else GarmentType.BLUSA,
+            garment_type=garment,
             has_sleeves=is_sleeves,
             neckline=neckline if neckline else "redondo",
             has_dart=is_dart,
             has_collar=is_collar,
             has_cuffs=is_cuffs
         )
-
-        # 6. Construir diagrama (Geométrico ou IA)
-        if is_ai_mode:
-            try:
-                llm_service = LLMPatternService()
-                molde_json = await llm_service.generate_draft(features, size_system, size_label, language)
-                if molde_json and "pecas" in molde_json:
-                    pieces = llm_service.parse_llm_response(molde_json)
-                else:
-                    # Fallback para geométrico se IA falhar
-                    builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
-                    pieces = builder.build_all()
-            except Exception as e:
-                logger = logging.getLogger(__name__)
-                logger.error(f"Erro no Modo IA: {e}")
-                builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
-                pieces = builder.build_all()
-        else:
-            builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
-            pieces = builder.build_all()
-
-        # 7. Aplicar folga (Apenas se não for IA, pois a IA já aplica folga no prompt)
-        if not is_ai_mode:
-            pieces = apply_ease_to_pieces(pieces, fabric, fit, features.has_sleeves)
-
+        
+        # 6. Construir diagrama (APENAS GEOMÉTRICO - sem IA)
+        builder = DiagramBuilder(measurements, features, reference=reference, size=size_label)
+        pieces = builder.build_all()
+        
+        # 7. Aplicar folga
+        pieces = apply_ease_to_pieces(pieces, fabric, fit, features.has_sleeves)
+        
         # 8. Atualizar metadados das peças
         for piece in pieces:
             piece.size = f"{size_system}:{size_label}"
             piece.reference = f"{reference}-{piece.name[0].upper()}"
-
+        
         # 9. Gerar preview PNG
         preview_path = job_dir / "molde_preview.png"
         generate_preview(
@@ -229,15 +208,15 @@ async def generate_pattern(
             str(preview_path),
             title=f"{reference} - {size_system}:{size_label}"
         )
-
+        
         # 10. Exportar PDF
         pdf_path = job_dir / "molde.pdf"
         export_to_pdf(pieces, str(pdf_path), title=f"{reference} - {size_system}:{size_label}")
-
+        
         # 11. Limpar diretório temporário em background
         background = BackgroundTasks()
         background.add_task(_cleanup_job_dir, job_dir, file_id)
-
+        
         # 12. Retornar JSON com URLs
         preview_filename = "molde_preview.png"
         pdf_filename = "molde.pdf"
@@ -255,7 +234,7 @@ async def generate_pattern(
             },
             background=background
         )
-
+    
     except HTTPException:
         # Limpar em caso de erro
         if job_dir.exists():
@@ -270,11 +249,9 @@ async def generate_pattern(
         msg = get_message(language, "processing_error")
         raise HTTPException(status_code=500, detail=msg)
 
-
 def _calculate_size_delta(size: str) -> int:
     """
     Calcula delta de tamanho em relação ao base (M/40).
-
     Ex: G/42 → +1, P/38 → -1
     """
     size_map = {
@@ -287,7 +264,6 @@ def _calculate_size_delta(size: str) -> int:
     }
     return size_map.get(size, 0)
 
-
 async def _cleanup_job_dir(job_dir: Path, file_id: str):
     """
     Limpa diretório do job após delay.
@@ -296,7 +272,6 @@ async def _cleanup_job_dir(job_dir: Path, file_id: str):
     await asyncio.sleep(86400)  # 24 horas
     if job_dir.exists():
         shutil.rmtree(job_dir, ignore_errors=True)
-
 
 async def _cleanup_temp(tmpdir: Path):
     """Limpa diretório temporário após resposta."""
